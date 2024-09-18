@@ -1,0 +1,403 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  # Lambda Function
+  TrialLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: 'trial'
+      Runtime: 'python3.12'
+      Architectures:
+        - 'x86_64'
+      Handler: 'index.lambda_handler'
+      Role: 'arn:aws:iam::633448752051:role/LabRole' # Replace with the actual ARN of the existing role
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          def lambda_handler(event, context):
+              print("Event: ", json.dumps(event))
+              
+              # Create an SNS client
+              sns_client = boto3.client('sns', region_name='us-east-1')
+              
+              # Extract email from the incoming request
+              try:
+                  body = json.loads(event['body']) if 'body' in event else event
+                  email = body.get('email')
+                  title = body.get('title')
+              except Exception as e:
+                  return {
+                      'statusCode': 400,
+                      'body': json.dumps({'error': 'Invalid request format'})
+                  }
+              
+              if not email:
+                  return {
+                      'statusCode': 400,
+                      'body': json.dumps({'error': 'Email address is required'})
+                  }
+
+              # Replace with your SNS topic ARN
+              topic_arn = 'arn:aws:sns:us-east-1:633448752051:email-sns'
+              
+              # Subscribe the email to the topic
+              try:
+                  sns_client.subscribe(
+                      TopicArn=topic_arn,
+                      Protocol='email',
+                      Endpoint=email
+                  )
+
+                  # Publish a message to the topic
+                  sns_client.publish(
+                      TopicArn=topic_arn,
+                      Subject='You got a comment on your post',
+                      Message='People want to know more about the post "{}". Check out the comment section of your post'.format(title)
+                  )
+
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({'message': 'Email sent successfully'})
+                  }
+
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+      Timeout: 60
+
+#   # API Gateway REST API
+#   TrialApi:
+#     Type: 'AWS::ApiGateway::RestApi'
+#     Properties:
+#       Name: 'trial-gateway'
+#       EndpointConfiguration:
+#         Types:
+#           - 'REGIONAL'
+
+#   # API Gateway Resource
+#   ApiResource:
+#     Type: 'AWS::ApiGateway::Resource'
+#     Properties:
+#       ParentId: !GetAtt TrialApi.RootResourceId
+#       PathPart: 'endpoint'
+#       RestApiId: !Ref TrialApi
+
+#   # API Gateway Method
+#   ApiMethod:
+#     Type: 'AWS::ApiGateway::Method'
+#     Properties:
+#       AuthorizationType: 'NONE'
+#       HttpMethod: 'POST'
+#       ResourceId: !Ref ApiResource
+#       RestApiId: !Ref TrialApi
+#       Integration:
+#         IntegrationHttpMethod: 'POST'
+#         Type: 'AWS_PROXY'
+#         Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TrialLambdaFunction.Arn}/invocations'
+#       MethodResponses:
+#         - StatusCode: '200'
+#         - StatusCode: '400'
+#         - StatusCode: '500'
+
+#   # Lambda Permission for API Gateway
+#   LambdaApiGatewayPermission:
+#     Type: 'AWS::Lambda::Permission'
+#     Properties:
+#       Action: 'lambda:InvokeFunction'
+#       FunctionName: !Ref TrialLambdaFunction
+#       Principal: 'apigateway.amazonaws.com'
+#       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${TrialApi}/*/POST/endpoint'
+
+#   # API Gateway Deployment
+#   ApiDeployment:
+#     Type: 'AWS::ApiGateway::Deployment'
+#     DependsOn: ApiMethod
+#     Properties:
+#       RestApiId: !Ref TrialApi
+#       StageName: 'dev'
+
+#   # API Gateway Gateway Responses
+#   Default4xxGatewayResponse:
+#     Type: 'AWS::ApiGateway::GatewayResponse'
+#     Properties:
+#       RestApiId: !Ref TrialApi
+#       ResponseType: 'DEFAULT_4XX'
+#       StatusCode: '400'
+#       ResponseTemplates:
+#         application/json: '{"message":"Bad Request"}'
+
+#   Default5xxGatewayResponse:
+#     Type: 'AWS::ApiGateway::GatewayResponse'
+#     Properties:
+#       RestApiId: !Ref TrialApi
+#       ResponseType: 'DEFAULT_5XX'
+#       StatusCode: '500'
+#       ResponseTemplates:
+#         application/json: '{"message":"Internal Server Error"}'
+
+#   # API Gateway CORS Configuration
+#   ApiGatewayCorsConfiguration:
+#     Type: 'AWS::ApiGateway::Method'
+#     Properties:
+#       AuthorizationType: 'NONE'
+#       HttpMethod: 'OPTIONS'
+#       ResourceId: !Ref ApiResource
+#       RestApiId: !Ref TrialApi
+#       MethodResponses:
+#         - StatusCode: '200'
+#           ResponseParameters:
+#             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+#             method.response.header.Access-Control-Allow-Origin: "'*'"
+#             method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+#       Integration:
+#         IntegrationHttpMethod: 'OPTIONS'
+#         Type: 'MOCK'
+#         PassthroughBehavior: 'WHEN_NO_MATCH'
+#         RequestTemplates:
+#           application/json: '{}'
+#         IntegrationResponses:
+#           - StatusCode: '200'
+#             ResponseParameters:
+#               method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+#               method.response.header.Access-Control-Allow-Origin: "'*'"
+#               method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+#             ResponseTemplates:
+#               application/json: '{}'
+
+
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ""
+
+Resources:
+  LambdaFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: ""
+      Handler: "lambda_function.lambda_handler"
+      Architectures:
+        - "x86_64"
+      Code:
+        S3Bucket: "alllambdabackup"
+        S3Key:
+          Fn::Sub: "registration-d619153d-d79e-45f7-b237-e9e6c5b1fec3.zip"
+      MemorySize: 128
+      Role:
+        Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Runtime: "python3.12"
+      Timeout: 300
+      TracingConfig:
+        Mode: "PassThrough"
+      EphemeralStorage:
+        Size: 512
+
+  LambdaFunction2:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: ""
+      Handler: "lambda_function.lambda_handler"
+      Architectures:
+        - "x86_64"
+      Code:
+        S3Bucket: "alllambdabackup"
+        S3Key:
+          Fn::Sub: "profilesender-c0180d46-4b56-43aa-92f6-850674332348.zip"
+      MemorySize: 128
+      Role:
+        Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Runtime: "python3.12"
+      Timeout: 300
+      TracingConfig:
+        Mode: "PassThrough"
+      EphemeralStorage:
+        Size: 512
+
+  ApiGatewayResource1:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      PathPart: "sendportfolio"
+      ParentId:
+        Fn::GetAtt:
+          - "ApiGatewayRestApi"
+          - "RootResourceId"
+
+  ApiGatewayResource2:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      PathPart: "registration"
+      ParentId:
+        Fn::GetAtt:
+          - "ApiGatewayRestApi"
+          - "RootResourceId"
+
+  LambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName:
+        Fn::GetAtt:
+          - "LambdaFunction2"
+          - "Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn:
+        Fn::Sub: "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/sendportfolio"
+
+  LambdaPermission2:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName:
+        Fn::GetAtt:
+          - "LambdaFunction"
+          - "Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn:
+        Fn::Sub: "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/registration"
+
+  ApiGatewayRestApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: "MyApiGateway"
+      ApiKeySourceType: "HEADER"
+      EndpointConfiguration:
+        Types:
+          - "REGIONAL"
+
+  ApiGatewayMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      ResourceId:
+        Ref: ApiGatewayResource1
+      HttpMethod: "POST"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      RequestModels: {}
+      MethodResponses:
+        - ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+          StatusCode: "200"
+      Integration:
+        ContentHandling: "CONVERT_TO_TEXT"
+        IntegrationHttpMethod: "POST"
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "AWS"
+        Uri:
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LambdaFunction2}/invocations"
+
+  ApiGatewayMethod2:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      ResourceId:
+        Ref: ApiGatewayResource2
+      HttpMethod: "POST"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      RequestModels: {}
+      MethodResponses:
+        - ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+          StatusCode: "200"
+      Integration:
+        ContentHandling: "CONVERT_TO_TEXT"
+        IntegrationHttpMethod: "POST"
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "AWS"
+        Uri:
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LambdaFunction}/invocations"
+
+  ApiGatewayMethodOPTIONS1:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId:
+        Ref: ApiGatewayResource1
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: "Empty"
+
+  ApiGatewayMethodOPTIONS2:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId:
+        Ref: ApiGatewayResource2
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: "Empty"
+
+  ApiGatewayDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - ApiGatewayMethod
+      - ApiGatewayMethod2
+      - ApiGatewayMethodOPTIONS1
+      - ApiGatewayMethodOPTIONS2
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      StageName: "prod"

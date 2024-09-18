@@ -1,0 +1,287 @@
+Parameters:
+  InstanceName:
+    Type: String
+    Description: The name of the EC2 instance
+
+  AccessKeyId:
+    Type: String
+    Description: AWS Access Key ID
+    NoEcho: true 
+
+  SecretAccessKey:
+    Type: String
+    Description: AWS Secret Access Key
+    NoEcho: true 
+
+  SessionToken:
+    Type: String
+    Description: AWS Session Token
+    NoEcho: true 
+
+  SecretManagerName:
+    Type: String
+    Description: Secret Manager Name
+    NoEcho: true 
+
+  DBUsername:
+    Description: The database admin account username
+    Type: String
+    Default: parth
+
+  DBPassword:
+    Description: The database admin account password
+    Type: String
+    NoEcho: true
+    Default: Parth.mdv132
+
+Resources:
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: MyDatabaseSecret
+    Properties:
+      InstanceType: t2.micro
+      KeyName: backend-key-pair
+      ImageId: ami-0ba9883b710b05ac6  
+      SecurityGroupIds:
+        - !Ref MySecurityGroup
+      IamInstanceProfile: !Ref MyInstanceProfile
+      Tags:
+        - Key: Name
+          Value: trial
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo yum update -y
+          sudo yum install -y docker
+          sudo service docker start
+          sudo usermod -a -G docker ec2-user
+          docker pull pmadhvani/cf2
+          docker run -d -p 80:80 pmadhvani/cf2
+          docker pull pmadhvani/cb2
+          docker run -d -p 8080:8080 \
+          -e AWS_ACCESS_KEY=${AccessKeyId} \
+          -e AWS_SECRET_KEY=${SecretAccessKey} \
+          -e AWS_SESSION_TOKEN=${SessionToken} \
+          -e SECRET_MANAGER_NAME=${SecretManagerName} \
+          pmadhvani/cb2
+
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group with custom inbound rules
+      SecurityGroupIngress:
+        - IpProtocol: -1  
+          FromPort: -1    
+          ToPort: -1      
+          CidrIp: 0.0.0.0/0  
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0 
+      Tags:
+        - Key: Name
+          Value: MySecurityGroup
+
+  MyInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - EMR_EC2_DefaultRole
+
+  SubscriptionLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: sendSubscription
+      Handler: index.lambda_handler
+      Role: arn:aws:iam::633448752051:role/LabRole
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          sns_client = boto3.client('sns')
+          def lambda_handler(event, context):
+              print("Event: ", json.dumps(event))           
+              try:
+                  body = json.loads(event['body']) if 'body' in event else event
+                  email = body.get('email')
+                  title = body.get('title')
+              except Exception as e:
+                  return {
+                      'statusCode': 400,
+                      'body': json.dumps({'error': 'Invalid request format'})
+                  }   
+              if not email:
+                  return {
+                      'statusCode': 400,
+                      'body': json.dumps({'error': 'Email address is required'})
+                  }
+              topic_arn = 'arn:aws:sns:us-east-1:633448752051:emailService'
+              try:
+                  sns_client.subscribe(
+                      TopicArn=topic_arn,
+                      Protocol='email',
+                      Endpoint=email
+                  )
+                  sns_client.publish(
+                    TopicArn=topic_arn,
+                    Subject='You got a comment on your post',
+                    Message='People wants to know more about the post "{}". Checkout the comment section of your post'.format(title)
+                  )
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({'message': 'Email sent successfully'})
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 128
+
+  # Create the API Gateway REST API
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: MyApiGateway
+      Description: Subscription handelling
+      FailOnWarnings: true
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # Create the API Gateway Resource
+  ApiGatewayResourceSendSubscription:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: sendSubscription
+      RestApiId: !Ref ApiGatewayRestApi
+
+  # Create the POST method for the API Gateway Resource
+  ApiGatewayMethodSendSubscriptionPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      ResourceId: !Ref ApiGatewayResourceSendSubscription
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        Credentials: arn:aws:iam::633448752051:role/LabRole
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri:
+          Fn::Sub:
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+            - LambdaArn: !GetAtt SubscriptionLambdaFunction.Arn
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: "{}"
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,access-control-allow-credentials'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Credentials: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: "Empty"
+
+  # Create the OPTIONS method for CORS
+  ApiGatewayMethodSendSubscriptionOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref ApiGatewayResourceSendSubscription
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,access-control-allow-credentials'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+        RequestTemplates:
+          application/json: "{\"statusCode\": 200}"
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+
+  # Grant API Gateway permission to invoke the Lambda function
+  LambdaApiGatewayInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SubscriptionLambdaFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/sendSubscription
+          - { ApiGatewayRestApi: !Ref ApiGatewayRestApi }
+
+  # Deploy the API Gateway
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties: 
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: prod
+    DependsOn:
+      - ApiGatewayMethodSendSubscriptionPost
+      - ApiGatewayMethodSendSubscriptionOptions
+    
+  MyDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: '20'
+      AvailabilityZone: 'us-east-1f'
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: '8.0'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBName: trial
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      StorageType: gp2
+      PubliclyAccessible: true
+      VPCSecurityGroups:
+        - sg-068201321ea615de9
+      Tags:
+        - Key: Name
+          Value: MyRDSInstance
+      DBInstanceIdentifier: mydb
+
+  MyDatabaseSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: manager 
+      Description: "Secret for the database credentials"
+      SecretString: !Sub |
+        {
+          "host": "${MyDBInstance.Endpoint.Address}",
+          "user": "${DBUsername}",
+          "password": "${DBPassword}",
+          "database": "trial"
+        }
+
+  # SNS Topic
+  BlogTrialSNSTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: 'emailService'
+      DisplayName: 'BLOGS'

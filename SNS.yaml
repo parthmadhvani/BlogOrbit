@@ -1,0 +1,11 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  # SNS Topic
+  BlogTrialSNSTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: 'tral'
+      DisplayName: 'blogs-trial'
+      Subscription:
+        - Protocol: 'email'
+          # Endpoint: 'example@example.com' # Replace with the recipient's email

@@ -1,0 +1,631 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create an EC2 instance with specified inbound rules and IAM role in the default VPC
+
+Parameters:
+  InstanceName:
+    Type: String
+    Description: The name of the EC2 instance
+
+  AccessKeyId:
+    Type: String
+    Description: AWS Access Key ID
+    NoEcho: true  # Hides the value in the console and CloudFormation logs
+
+  SecretAccessKey:
+    Type: String
+    Description: AWS Secret Access Key
+    NoEcho: true  # Hides the value in the console and CloudFormation logs
+
+  SessionToken:
+    Type: String
+    Description: AWS Session Token
+    NoEcho: true  # Hides the value in the console and CloudFormation logs
+
+  SecretManagerName:
+    Type: String
+    Description: Secret Manager Name
+    NoEcho: true  # Hides the value in the console and CloudFormation logs
+
+
+  DBUsername:
+    Description: The database admin account username
+    Type: String
+    Default: mydbuser
+
+  DBPassword:
+    Description: The database admin account password
+    Type: String
+    NoEcho: true
+    Default: mydbpassword
+
+Resources:
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      KeyName: backend-key-pair
+      ImageId: ami-0ba9883b710b05ac6  # Replace with the Amazon Linux 2023 AMI ID for your region
+      SecurityGroupIds:
+        - !Ref MySecurityGroup
+      IamInstanceProfile: !Ref MyInstanceProfile
+      Tags:
+        - Key: Name
+          Value: trial
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo yum update -y
+          sudo yum install -y docker
+          sudo service docker start
+          sudo usermod -a -G docker ec2-user
+          docker pull pmadhvani/cf
+          docker run -d -p 80:80 pmadhvani/cf
+          docker pull pmadhvani/cb
+          docker run -d -p 8080:8080 \
+          -e AWS_ACCESS_KEY=${AccessKeyId} \
+          -e AWS_SECRET_KEY=${SecretAccessKey} \ 
+          -e AWS_SESSION_TOKEN=${SessionToken} \
+          -e SECRET_MANAGER_NAME=${SecretManagerName} \
+          pmadhvani/cb
+
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group with custom inbound rules
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0  # Allow TCP traffic on port 3000 from any IP address
+        - IpProtocol: -1  # -1 indicates all protocols
+          FromPort: -1    # -1 indicates all port ranges
+          ToPort: -1      # -1 indicates all port ranges
+          CidrIp: 0.0.0.0/0  # Allow all traffic from any IP address
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # Allow TCP traffic on port 22 from any IP address (SSH access)
+      Tags:
+        - Key: Name
+          Value: MySecurityGroup
+
+  MyInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - EMR_EC2_DefaultRole
+
+
+# AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  # SNS Topic
+  BlogTrialSNSTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: 'emailService'
+      DisplayName: 'BLOGS'
+      Subscription:
+        - Protocol: 'email'
+
+
+# AWSTemplateFormatVersion: "2010-09-09"
+Description: ""
+
+Resources:
+  LambdaFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: ""
+      Handler: "lambda_function.lambda_handler"
+      Architectures:
+        - "x86_64"
+      Code:
+        S3Bucket: "alllambdabackup"
+        S3Key:
+          Fn::Sub: "registration-d619153d-d79e-45f7-b237-e9e6c5b1fec3.zip"
+      MemorySize: 128
+      Role:
+        Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Runtime: "python3.12"
+      Timeout: 300
+      TracingConfig:
+        Mode: "PassThrough"
+      EphemeralStorage:
+        Size: 512
+
+  LambdaFunction2:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: ""
+      Handler: "lambda_function.lambda_handler"
+      Architectures:
+        - "x86_64"
+      Code:
+        S3Bucket: "alllambdabackup"
+        S3Key:
+          Fn::Sub: "profilesender-c0180d46-4b56-43aa-92f6-850674332348.zip"
+      MemorySize: 128
+      Role:
+        Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Runtime: "python3.12"
+      Timeout: 300
+      TracingConfig:
+        Mode: "PassThrough"
+      EphemeralStorage:
+        Size: 512
+
+  ApiGatewayResource1:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      PathPart: "sendportfolio"
+      ParentId:
+        Fn::GetAtt:
+          - "ApiGatewayRestApi"
+          - "RootResourceId"
+
+  ApiGatewayResource2:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      PathPart: "registration"
+      ParentId:
+        Fn::GetAtt:
+          - "ApiGatewayRestApi"
+          - "RootResourceId"
+
+  LambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName:
+        Fn::GetAtt:
+          - "LambdaFunction2"
+          - "Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn:
+        Fn::Sub: "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/sendportfolio"
+
+  LambdaPermission2:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName:
+        Fn::GetAtt:
+          - "LambdaFunction"
+          - "Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn:
+        Fn::Sub: "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/registration"
+
+  ApiGatewayRestApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: "MyApiGateway"
+      ApiKeySourceType: "HEADER"
+      EndpointConfiguration:
+        Types:
+          - "REGIONAL"
+
+  ApiGatewayMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      ResourceId:
+        Ref: ApiGatewayResource1
+      HttpMethod: "POST"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      RequestModels: {}
+      MethodResponses:
+        - ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+          StatusCode: "200"
+      Integration:
+        ContentHandling: "CONVERT_TO_TEXT"
+        IntegrationHttpMethod: "POST"
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "AWS"
+        Uri:
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LambdaFunction2}/invocations"
+
+  ApiGatewayMethod2:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      ResourceId:
+        Ref: ApiGatewayResource2
+      HttpMethod: "POST"
+      AuthorizationType: "NONE"
+      ApiKeyRequired: false
+      RequestParameters: {}
+      RequestModels: {}
+      MethodResponses:
+        - ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+          StatusCode: "200"
+      Integration:
+        ContentHandling: "CONVERT_TO_TEXT"
+        IntegrationHttpMethod: "POST"
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {}
+            StatusCode: "200"
+        PassthroughBehavior: "WHEN_NO_MATCH"
+        TimeoutInMillis: 29000
+        Type: "AWS"
+        Uri:
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LambdaFunction}/invocations"
+
+  ApiGatewayMethodOPTIONS1:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId:
+        Ref: ApiGatewayResource1
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: "Empty"
+
+  ApiGatewayMethodOPTIONS2:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId:
+        Ref: ApiGatewayResource2
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: "Empty"
+
+  ApiGatewayDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - ApiGatewayMethod
+      - ApiGatewayMethod2
+      - ApiGatewayMethodOPTIONS1
+      - ApiGatewayMethodOPTIONS2
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      StageName: "prod"
+
+
+# AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  A template to create a Lambda function that subscribes users to an SNS topic,
+  an API Gateway, and a POST method for that API Gateway.
+
+Resources:
+  # Create the Lambda function
+  SubscriptionLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: sendSubscription
+      Handler: index.lambda_handler
+      Role: arn:aws:iam::633448752051:role/LabRole
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          def lambda_handler(event, context):
+              print("Event: ", json.dumps(event))
+              
+              # Create an SNS client
+              sns_client = boto3.client('sns', region_name='us-east-1')
+              
+              # Extract email from the incoming request
+              try:
+                  body = json.loads(event['body']) if 'body' in event else event
+                  email = body.get('email')
+                  title = body.get('title')
+              except Exception as e:
+                  return {
+                      'statusCode': 400,
+                      'body': json.dumps({'error': 'Invalid request format'})
+                  }
+              
+              if not email:
+                  return {
+                      'statusCode': 400,
+                      'body': json.dumps({'error': 'Email address is required'})
+                  }
+
+              # Replace with your SNS topic ARN
+              topic_arn = 'arn:aws:sns:us-east-1:633448752051:emailService'
+              
+              # Subscribe the email to the topic
+              try:
+                  sns_client.subscribe(
+                      TopicArn=topic_arn,
+                      Protocol='email',
+                      Endpoint=email
+                  )
+
+                  # Publish a message to the topic
+                  sns_client.publish(
+                  TopicArn=topic_arn,
+                  Subject='You got a comment on your post',
+                  Message='People wants to know more about the post "{}". Checkout the comment section of your post'.format(title)
+              )
+
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({'message': 'Email sent successfully'})
+                  }
+
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 128
+
+  # Create the API Gateway REST API
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: MyApiGateway
+      Description: API Gateway for handling subscriptions
+      FailOnWarnings: true
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # Create the API Gateway Resource
+  ApiGatewayResourceSendSubscription:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: sendSubscription
+      RestApiId: !Ref ApiGatewayRestApi
+
+  # Create the POST method for the API Gateway Resource
+  ApiGatewayMethodSendSubscriptionPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      ResourceId: !Ref ApiGatewayResourceSendSubscription
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        Credentials: arn:aws:iam::633448752051:role/LabRole
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri:
+          Fn::Sub:
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+            - LambdaArn: !GetAtt SubscriptionLambdaFunction.Arn
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: "{}"
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,access-control-allow-credentials'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Credentials: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: "Empty"
+
+  # Create the OPTIONS method for CORS
+  ApiGatewayMethodSendSubscriptionOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref ApiGatewayResourceSendSubscription
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,access-control-allow-credentials'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+        RequestTemplates:
+          application/json: "{\"statusCode\": 200}"
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+
+  # Grant API Gateway permission to invoke the Lambda function
+  LambdaApiGatewayInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SubscriptionLambdaFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/sendSubscription
+          - { ApiGatewayRestApi: !Ref ApiGatewayRestApi }
+
+  # Deploy the API Gateway
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties: 
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: prod
+    DependsOn:
+      - ApiGatewayMethodSendSubscriptionPost
+      - ApiGatewayMethodSendSubscriptionOptions
+
+Outputs:
+  LambdaFunctionArn:
+    Description: "ARN of the Lambda function"
+    Value: !GetAtt SubscriptionLambdaFunction.Arn
+
+
+# AWSTemplateFormatVersion: '2010-09-09'
+# Resources:
+#   # Secrets Manager Secret for RDS
+#   RDSSecret5:
+#     Type: 'AWS::SecretsManager::Secret'
+#     Properties:
+#       Name: 'RDSSecret5'
+#       Description: 'Secret for RDS instance'
+#       SecretString: '{"username":"parth","password":"Parth.mdv132","host":"${RDSInstanceWithSecret.Endpoint.Address}"}'
+
+#   # RDS Instance to use the secret from Secrets Manager
+#   RDSInstanceWithSecret:
+#     Type: 'AWS::RDS::DBInstance'
+#     DependsOn: RDSSecret5
+#     Properties:
+#       DBName: 'trial'
+#       AllocatedStorage: '20'
+#       DBInstanceClass: 'db.t3.micro'
+#       Engine: 'MySQL'
+#       EngineVersion: '8.0.33'
+#       MasterUsername: 'parth'
+#       MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSSecret5}::password}}'
+#       DBInstanceIdentifier: 'rdstrial2'
+#       PubliclyAccessible: true
+#       VPCSecurityGroups: 
+#         - sg-068201321ea615de9
+
+
+# AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create an RDS instance and an AWS Secrets Manager Secret
+
+# Parameters:
+#   DBUsername:
+#     Description: The database admin account username
+#     Type: String
+#     Default: mydbuser
+
+#   DBPassword:
+#     Description: The database admin account password
+#     Type: String
+#     NoEcho: true
+#     Default: mydbpassword
+
+Resources:
+  MyDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: '20'
+      AvailabilityZone: 'us-east-1f'
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: '8.0'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBName: mydatabase
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      StorageType: gp2
+      PubliclyAccessible: true
+      VPCSecurityGroups:
+        - sg-068201321ea615de9
+      Tags:
+        - Key: Name
+          Value: MyRDSInstance
+      DBInstanceIdentifier: mydatabase-instance2
+
+  MyDatabaseSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: ${SecretManagerName}
+      Description: "Secret for the database credentials"
+      SecretString: !Sub |
+        {
+          "host": "${MyDBInstance.Endpoint.Address}",
+          "user": "${DBUsername}",
+          "password": "${DBPassword}",
+          "database": "trial"
+        }
+
+Outputs:
+  DBInstanceEndpoint:
+    Description: The endpoint of the RDS instance
+    Value: !GetAtt MyDBInstance.Endpoint.Address
+
+  DBInstancePort:
+    Description: The port of the RDS instance
+    Value: !GetAtt MyDBInstance.Endpoint.Port
+
+  SecretARN:
+    Description: "ARN of the created secret"
+    Value: !Ref MyDatabaseSecret
+
+
+# AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  # SNS Topic
+  BlogTrialSNSTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: 'emailService'
+      DisplayName: 'BLOGS'
+      Subscription:
+        - Protocol: 'email'
+          # Endpoint: 'example@example.com' # Replace with the recipient's email

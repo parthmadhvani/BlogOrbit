@@ -1,0 +1,121 @@
+# AWSTemplateFormatVersion: '2010-09-09'
+# Description: CloudFormation template to create an EC2 instance with specified inbound rules and IAM role in the default VPC
+
+# Resources:
+#   MyEC2Instance:
+#     Type: AWS::EC2::Instance
+#     Properties:
+#       InstanceType: t2.micro
+#       KeyName: backend-key-pair
+#       ImageId: ami-0ba9883b710b05ac6  # Replace with the Amazon Linux 2023 AMI ID for your region
+#       SecurityGroupIds:
+#         - !Ref MySecurityGroup
+#       IamInstanceProfile: !Ref MyInstanceProfile
+#       Tags:
+#         - Key: Name
+#           Value: trial
+
+#   MySecurityGroup:
+#     Type: AWS::EC2::SecurityGroup
+#     Properties:
+#       GroupDescription: Security group with custom inbound rules
+#       SecurityGroupIngress:
+#         - IpProtocol: tcp
+#           FromPort: 3000
+#           ToPort: 3000
+#           CidrIp: 0.0.0.0/0  # Allow TCP traffic on port 3000 from any IP address
+#         - IpProtocol: -1  # -1 indicates all protocols
+#           FromPort: -1    # -1 indicates all port ranges
+#           ToPort: -1      # -1 indicates all port ranges
+#           CidrIp: 0.0.0.0/0  # Allow all traffic from any IP address
+#         - IpProtocol: tcp
+#           FromPort: 22
+#           ToPort: 22
+#           CidrIp: 0.0.0.0/0  # Allow TCP traffic on port 22 from any IP address (SSH access)
+#       Tags:
+#         - Key: Name
+#           Value: MySecurityGroup
+
+#   MyInstanceProfile:
+#     Type: AWS::IAM::InstanceProfile
+#     Properties:
+#       Roles:
+#         - EMR_EC2_DefaultRole
+
+
+
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create an EC2 instance with specified inbound rules and IAM role in the default VPC
+
+Parameters:
+  InstanceName:
+    Type: String
+    Description: The name of the EC2 instance
+
+  AccessKeyId:
+    Type: String
+    Description: AWS Access Key ID
+    NoEcho: true  # Hides the value in the console and CloudFormation logs
+
+  SecretAccessKey:
+    Type: String
+    Description: AWS Secret Access Key
+    NoEcho: true  # Hides the value in the console and CloudFormation logs
+
+  SessionToken:
+    Type: String
+    Description: AWS Session Token
+    NoEcho: true  # Hides the value in the console and CloudFormation logs
+
+Resources:
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      KeyName: backend-key-pair
+      ImageId: ami-0ba9883b710b05ac6  # Replace with the Amazon Linux 2023 AMI ID for your region
+      SecurityGroupIds:
+        - !Ref MySecurityGroup
+      IamInstanceProfile: !Ref MyInstanceProfile
+      Tags:
+        - Key: Name
+          Value: trial
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo yum update -y
+          sudo yum install -y docker
+          sudo service docker start
+          sudo usermod -a -G docker ec2-user
+          docker pull pmadhvani/cf
+          docker run -d -p 80:80 jems007patel/frontend-dalcollab
+          docker pull pmadhvani/cb
+            docker run -d -p 8080:8080 pmadhvani/cb
+
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group with custom inbound rules
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0  # Allow TCP traffic on port 3000 from any IP address
+        - IpProtocol: -1  # -1 indicates all protocols
+          FromPort: -1    # -1 indicates all port ranges
+          ToPort: -1      # -1 indicates all port ranges
+          CidrIp: 0.0.0.0/0  # Allow all traffic from any IP address
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # Allow TCP traffic on port 22 from any IP address (SSH access)
+      Tags:
+        - Key: Name
+          Value: MySecurityGroup
+
+  MyInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - EMR_EC2_DefaultRole

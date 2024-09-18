@@ -1,0 +1,91 @@
+# AWSTemplateFormatVersion: '2010-09-09'
+# Resources:
+#   # Secrets Manager Secret for RDS
+#   RDSSecret5:
+#     Type: 'AWS::SecretsManager::Secret'
+#     Properties:
+#       Name: 'RDSSecret5'
+#       Description: 'Secret for RDS instance'
+#       SecretString: '{"username":"parth","password":"Parth.mdv132","host":"${RDSInstanceWithSecret.Endpoint.Address}"}'
+
+#   # RDS Instance to use the secret from Secrets Manager
+#   RDSInstanceWithSecret:
+#     Type: 'AWS::RDS::DBInstance'
+#     DependsOn: RDSSecret5
+#     Properties:
+#       DBName: 'trial'
+#       AllocatedStorage: '20'
+#       DBInstanceClass: 'db.t3.micro'
+#       Engine: 'MySQL'
+#       EngineVersion: '8.0.33'
+#       MasterUsername: 'parth'
+#       MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSSecret5}::password}}'
+#       DBInstanceIdentifier: 'rdstrial2'
+#       PubliclyAccessible: true
+#       VPCSecurityGroups: 
+#         - sg-068201321ea615de9
+
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create an RDS instance and an AWS Secrets Manager Secret
+
+Parameters:
+  DBUsername:
+    Description: The database admin account username
+    Type: String
+    Default: mydbuser
+
+  DBPassword:
+    Description: The database admin account password
+    Type: String
+    NoEcho: true
+    Default: mydbpassword
+
+Resources:
+  MyDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: '20'
+      AvailabilityZone: 'us-east-1f'
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: '8.0'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBName: mydatabase
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      StorageType: gp2
+      PubliclyAccessible: true
+      VPCSecurityGroups:
+        - sg-068201321ea615de9
+      Tags:
+        - Key: Name
+          Value: MyRDSInstance
+      DBInstanceIdentifier: mydatabase-instance2
+
+  MyDatabaseSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: "MyDatabaseSecret"
+      Description: "Secret for the database credentials"
+      SecretString: !Sub |
+        {
+          "host": "${MyDBInstance.Endpoint.Address}",
+          "user": "${DBUsername}",
+          "password": "${DBPassword}",
+          "database": "trial"
+        }
+
+Outputs:
+  DBInstanceEndpoint:
+    Description: The endpoint of the RDS instance
+    Value: !GetAtt MyDBInstance.Endpoint.Address
+
+  DBInstancePort:
+    Description: The port of the RDS instance
+    Value: !GetAtt MyDBInstance.Endpoint.Port
+
+  SecretARN:
+    Description: "ARN of the created secret"
+    Value: !Ref MyDatabaseSecret
